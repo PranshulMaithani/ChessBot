@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Project artifacts (large / regenerable)
+models/
+data/
+runs/
+*.pt
+*.pth
+*.ckpt
+*.pgn
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

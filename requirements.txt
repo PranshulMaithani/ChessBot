@@ -1,0 +1,11 @@
+numpy>=1.24
+chess>=1.10
+tqdm>=4.65
+matplotlib>=3.8
+
+# PyTorch is NOT pinned here because it must match your CUDA version.
+# This machine already has: torch 2.11.0 + CUDA 12.8 (cuda available = True).
+# To reproduce on another machine with an NVIDIA GPU:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+# CPU-only fallback:
+#   pip install torch
