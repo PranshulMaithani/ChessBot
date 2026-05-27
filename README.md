@@ -50,9 +50,18 @@ pip install -r requirements.txt
 ## Run
 
 ```bash
-python tests/test_games.py      # sanity-check the game implementations
+python tests/test_games.py            # sanity-check Tic-Tac-Toe
+python tests/test_chess.py            # sanity-check the chess adapter
+
+python scripts/train_tictactoe.py     # Stage 0: converges to perfect play
+
+python scripts/train_chess.py         # Stage 1: self-play chess (runs until stopped)
+python scripts/train_chess.py --resume   # continue from models/latest.pt
+python scripts/plot_metrics.py        # draw the learning curve -> docs/plots/
 ```
-(more entry points added as stages land)
+
+Training saves `models/latest.pt` every iteration and `models/best.pt` on each
+arena promotion, so it is safe to Ctrl-C and `--resume`.
 
 ## Journal
 

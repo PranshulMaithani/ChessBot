@@ -12,6 +12,9 @@ noisily wandering.
 """
 from __future__ import annotations
 
+import csv
+import json
+import os
 from collections import deque
 
 from src.core.arena import greedy_mcts_player, play_match
@@ -20,11 +23,12 @@ from src.nn.net import NeuralNet
 
 
 class Coach:
-    def __init__(self, game, net, config, eval_hook=None):
+    def __init__(self, game, net, config, eval_hook=None, metrics_csv=None):
         self.game = game
         self.net = net
         self.config = config
         self.eval_hook = eval_hook  # optional: (iter, net) -> dict of extra metrics
+        self.metrics_csv = metrics_csv  # optional path to append per-iter metrics
         self.history = deque(maxlen=config.replay_window)
         self.metrics = []
 
@@ -55,6 +59,8 @@ class Coach:
                 self.net.save_checkpoint("best.pt")
             else:
                 self.net.load_checkpoint("temp.pt")  # revert to previous weights
+            # always save the latest weights so a long run is resumable / crash-safe
+            self.net.save_checkpoint("latest.pt")
 
             row = {
                 "iter": it,
@@ -68,7 +74,32 @@ class Coach:
                 row.update(self.eval_hook(it, self.net))
             self.metrics.append(row)
             self._log(row)
+            self._append_csv(row)
         return self.metrics
+
+    def _append_csv(self, row):
+        if not self.metrics_csv:
+            return
+        os.makedirs(os.path.dirname(self.metrics_csv) or ".", exist_ok=True)
+        nwins, owins, draws = row["arena"]
+        skip = {"iter", "pi_loss", "v_loss", "arena", "accepted", "examples"}
+        flat = {
+            "iter": row["iter"],
+            "examples": row["examples"],
+            "pi_loss": round(row["pi_loss"], 5),
+            "v_loss": round(row["v_loss"], 5),
+            "arena_new": nwins,
+            "arena_old": owins,
+            "arena_draw": draws,
+            "accepted": int(row["accepted"]),
+            "extra": json.dumps({k: v for k, v in row.items() if k not in skip}),
+        }
+        write_header = not os.path.exists(self.metrics_csv)
+        with open(self.metrics_csv, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(flat))
+            if write_header:
+                writer.writeheader()
+            writer.writerow(flat)
 
     @staticmethod
     def _log(row):

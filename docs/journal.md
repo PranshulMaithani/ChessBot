@@ -4,6 +4,40 @@ A running log of decisions, experiments, and results. Newest entries on top.
 
 ---
 
+## 2026-05-28 — Stage 1: chess pipeline live
+
+**Goal:** plug chess into the validated core and start a self-play run.
+
+**Built**
+- `src/games/chess_game.py`: chess over python-chess with
+  - canonical form = always white-to-move (mirror when black to move),
+  - AlphaZero 8x8x73 = 4672 action encoding (queen / knight / underpromotion),
+  - 18-plane board encoding (12 pieces + 4 castling + ep + halfmove clock).
+- 8 correctness tests (`tests/test_chess.py`): encoding bijectivity, canonical
+  mirroring, terminal values, random-game consistency. All pass.
+- Generic upgrades: ply cap (adjudicate draw), per-iteration `latest.pt`
+  checkpoint, CSV metrics, `scripts/plot_metrics.py`.
+- `scripts/train_chess.py`: resumable overnight runner.
+
+**Sanity check**
+- Smoke run completed on GPU; untrained `pi_loss = 8.46 ~= ln(4672)`, i.e. the
+  policy starts exactly uniform over the legal action space (as it should).
+
+**Starting config (laptop overnight):** 64ch x6 ResNet, 80 MCTS sims,
+16 games/iter, replay window 8, 200-ply cap. Progress probe = raw-policy
+(no search) win rate vs a random mover.
+
+**Known limits / Stage 2 levers**
+- 80 sims is low (AlphaZero used 800) — sims is the main strength/speed knob.
+- MCTS is single-board + recursive + `board.copy()`; batched inference and
+  make/undo are the big speedups.
+- No board-history planes yet.
+
+**Next**
+- Train overnight; morning: plot the curve and play a game against it.
+
+---
+
 ## 2026-05-28 — Day 0: foundations
 
 **Goal:** stand up the project and the core abstraction.

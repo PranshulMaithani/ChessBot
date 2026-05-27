@@ -31,6 +31,8 @@ def execute_episode(game, net, config):
         board, player = game.get_next_state(board, player, action)
 
         result = game.get_game_ended(board, player)  # from current player's view
+        if result == 0 and config.max_game_len and step >= config.max_game_len:
+            result = 1e-4  # adjudicate over-long game as a draw
         if result != 0:
             # z is +result for positions where it was this player's move, else -result
             return [

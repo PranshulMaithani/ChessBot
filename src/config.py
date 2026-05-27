@@ -24,6 +24,7 @@ class Config:
     num_iters: int = 15          # outer loop: (self-play -> train -> arena)
     selfplay_games: int = 40     # games generated per iteration
     temp_threshold: int = 6      # after this many plies, play greedily (temp->0)
+    max_game_len: int = 0        # ply cap; 0 = no cap (adjudicate draw if hit)
 
     # --- training ---
     epochs: int = 10

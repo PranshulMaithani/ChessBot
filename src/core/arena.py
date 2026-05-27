@@ -51,6 +51,17 @@ def greedy_mcts_player(game, net, config):
     return play
 
 
+def raw_policy_player(game, net):
+    """Fast probe player: one net eval per move, pick the best legal action
+    from the raw policy with no search. Useful for cheap progress checks."""
+    def play(canon):
+        p, _ = net.predict(canon)
+        valid = game.get_valid_moves(canon, 1)
+        p = p * valid
+        return int(np.argmax(p))
+    return play
+
+
 def random_player(game):
     def play(canon):
         valid = game.get_valid_moves(canon, 1)
