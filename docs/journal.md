@@ -25,10 +25,21 @@ A running log of decisions, experiments, and results. Newest entries on top.
 - `Game` interface (`src/games/base.py`).
 - Tic-Tac-Toe implementation + random-game sanity tests.
 
+**Result — Stage 0 gate: PASSED**
+- Built the full loop: ResNet policy/value net, PUCT MCTS, self-play, trainer,
+  arena gate (`src/nn`, `src/core`).
+- Validation run (12 iters, 25 games/iter, 30 sims): the agent reached
+  **perfect play** — vs a minimax solver it went 0W/0L/40D (optimal TTT is a
+  forced draw), and 37/0/3 vs a random mover. Zero losses by iter 5.
+- `pi_loss` 1.57 -> 1.09, `v_loss` 0.45 -> 0.22.
+- Note: once the game is solved, the arena correctly rejects all further
+  candidates (a new net can't beat an already-perfect one). Expected, not a bug.
+- Repro: `python scripts/train_tictactoe.py --iters 12 --games 25 --sims 30`
+
 **Next**
-- Neural net (small ResNet, policy + value heads).
-- MCTS.
-- Self-play + training loop; confirm Tic-Tac-Toe converges to perfect play.
+- Stage 0.5: Connect 4 (real MCTS+NN stress test at small scale).
+- Persist per-iteration metrics + plot the learning curve (for the journal).
+- Then Stage 1: the chess adapter.
 
 **Open questions**
 - Net size vs. MCTS sims trade-off on 8 GB VRAM (revisit at Stage 1).
