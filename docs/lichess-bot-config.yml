@@ -1,0 +1,51 @@
+# Drop this into your lichess-bot/ checkout as `config.yml` and fill in `token`.
+# The only fields specific to Chesseng are `engine.dir` and `engine.name`;
+# everything else is standard lichess-bot configuration.
+
+token: "REPLACE_WITH_YOUR_LICHESS_BOT_TOKEN"  # Lichess > Preferences > API access tokens, scope: Play bot moves
+
+url: "https://lichess.org/"
+
+engine:
+  dir: "D:/GoodProjects/Chesseng/scripts/"
+  name: "chesseng_engine.bat"          # the launcher we created
+  working_dir: "D:/GoodProjects/Chesseng/"
+  protocol: "uci"
+  ponder: false
+  engine_options: {}
+  uci_options:
+    Sims: 400                          # MCTS sims per move; raise for stronger play, lower for snappier moves
+
+  polyglot:
+    enabled: false
+  draw_or_resign:
+    resign_enabled: false
+    offer_draw_enabled: false
+
+abort_time: 20            # seconds before aborting a game with no opponent move
+fake_think_time: false
+move_overhead: 2000       # ms safety buffer per move; bump if you ever time out
+
+correspondence:
+  checkin_period: 600
+  move_time: 60
+  disconnect_time: 300
+
+challenge:
+  concurrency: 1          # one game at a time; one GPU
+  sort_by: "best"
+  accept_bot: true
+  only_bot: false
+  max_increment: 60
+  min_increment: 0
+  max_base: 1800          # accept up to 30+? games; bump if you want longer
+  min_base: 60            # bullet is hopeless for us — keep min sane
+  variants:
+    - standard
+  time_controls:
+    - blitz
+    - rapid
+    - classical
+  modes:
+    - casual
+    - rated

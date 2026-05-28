@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import time
 from collections import deque
 
 from tqdm import tqdm
@@ -36,72 +37,89 @@ class Coach:
 
     def learn(self):
         prev_net = NeuralNet(self.game, self.config)
-        for it in range(1, self.config.num_iters + 1):
-            print(f"\n{'='*20} Iteration {it}/{self.config.num_iters} {'='*20}")
-            # 1) self-play (parallel workers when configured)
-            workers = getattr(self.config, "selfplay_workers", 1)
-            if workers > 1:
-                from src.core.parallel_selfplay import parallel_selfplay
-                print(f"  spawning {workers} self-play workers "
-                      f"on {getattr(self.config, 'selfplay_worker_device', 'cpu')} "
-                      f"for {self.config.selfplay_games} games...", flush=True)
-                iter_examples = parallel_selfplay(
-                    self.game, self.net, self.config,
-                    self.config.selfplay_games, workers,
-                    worker_device=getattr(self.config, "selfplay_worker_device", "cpu"),
-                )
-                print(f"  self-play done: {len(iter_examples):,} examples", flush=True)
-            else:
-                iter_examples = []
-                for _ in tqdm(range(self.config.selfplay_games), desc="Self-Play", unit="game"):
-                    iter_examples += execute_episode(self.game, self.net, self.config)
-            self.history.append(iter_examples)
-            train_examples = [e for batch in self.history for e in batch]
 
-            # 2) snapshot the current net as "previous", then train the candidate
-            self.net.save_checkpoint("temp.pt")
-            prev_net.load_checkpoint("temp.pt")
-            pi_loss, v_loss = self.net.train(train_examples)
+        # Persistent self-play pool: workers spawn once and stay alive across
+        # iterations, eliminating the ~15-30s respawn cost we used to pay every
+        # iter. Only used when selfplay_workers > 1.
+        workers = getattr(self.config, "selfplay_workers", 1)
+        pool = None
+        if workers > 1:
+            from src.core.persistent_selfplay import PersistentSelfplayPool
+            worker_device = getattr(self.config, "selfplay_worker_device", "cpu")
+            print(f"starting persistent pool: {workers} workers on {worker_device} "
+                  f"(workers stay alive across iters)", flush=True)
+            pool = PersistentSelfplayPool(self.game, self.config, workers, worker_device)
+            pool.start()
 
-            # 3) gate: warmup iterations skip the arena and always accept the
-            #    trained candidate (so the net can leave initialization before
-            #    a noisy gate starts filtering); after that, standard head-to-head.
-            warmup = it <= self.config.warmup_iters
-            if warmup:
-                nwins = owins = draws = 0
-                accepted = True
-                self.net.save_checkpoint("best.pt")
-            else:
-                new_p = greedy_mcts_player(self.game, self.net, self.config)
-                old_p = greedy_mcts_player(self.game, prev_net, self.config)
-                nwins, owins, draws = play_match(
-                    self.game, new_p, old_p, self.config.arena_games,
-                    max_moves=self.config.max_game_len,
-                )
-                decided = nwins + owins
-                accepted = (decided > 0
-                            and nwins / decided >= self.config.update_threshold)
-                if accepted:
+        try:
+            for it in range(1, self.config.num_iters + 1):
+                print(f"\n{'='*20} Iteration {it}/{self.config.num_iters} {'='*20}")
+                # 1) self-play
+                t0 = time.perf_counter()
+                if pool is not None:
+                    iter_examples = pool.run(self.net, self.config.selfplay_games)
+                    elapsed = time.perf_counter() - t0
+                    print(f"  self-play done: {len(iter_examples):,} examples "
+                          f"in {elapsed:.1f}s "
+                          f"({self.config.selfplay_games / elapsed:.2f} games/s)",
+                          flush=True)
+                else:
+                    iter_examples = []
+                    for _ in tqdm(range(self.config.selfplay_games), desc="Self-Play", unit="game"):
+                        iter_examples += execute_episode(self.game, self.net, self.config)
+                    elapsed = time.perf_counter() - t0
+                    print(f"  self-play done: {len(iter_examples):,} examples in {elapsed:.1f}s",
+                          flush=True)
+                self.history.append(iter_examples)
+                train_examples = [e for batch in self.history for e in batch]
+
+                # 2) snapshot the current net as "previous", then train the candidate
+                self.net.save_checkpoint("temp.pt")
+                prev_net.load_checkpoint("temp.pt")
+                pi_loss, v_loss = self.net.train(train_examples)
+
+                # 3) gate: warmup iterations skip the arena and always accept the
+                #    trained candidate (so the net can leave initialization before
+                #    a noisy gate starts filtering); after that, standard head-to-head.
+                warmup = it <= self.config.warmup_iters
+                if warmup:
+                    nwins = owins = draws = 0
+                    accepted = True
                     self.net.save_checkpoint("best.pt")
                 else:
-                    self.net.load_checkpoint("temp.pt")  # revert to previous weights
-            # always save the latest weights so a long run is resumable / crash-safe
-            self.net.save_checkpoint("latest.pt")
+                    new_p = greedy_mcts_player(self.game, self.net, self.config)
+                    old_p = greedy_mcts_player(self.game, prev_net, self.config)
+                    nwins, owins, draws = play_match(
+                        self.game, new_p, old_p, self.config.arena_games,
+                        max_moves=self.config.max_game_len,
+                    )
+                    decided = nwins + owins
+                    accepted = (decided > 0
+                                and nwins / decided >= self.config.update_threshold)
+                    if accepted:
+                        self.net.save_checkpoint("best.pt")
+                    else:
+                        self.net.load_checkpoint("temp.pt")  # revert to previous weights
+                # always save the latest weights so a long run is resumable / crash-safe
+                self.net.save_checkpoint("latest.pt")
 
-            row = {
-                "iter": it,
-                "examples": len(train_examples),
-                "pi_loss": pi_loss,
-                "v_loss": v_loss,
-                "arena": (nwins, owins, draws),
-                "accepted": accepted,
-                "warmup": warmup,
-            }
-            if self.eval_hook is not None:
-                row.update(self.eval_hook(it, self.net))
-            self.metrics.append(row)
-            self._log(row)
-            self._append_csv(row)
+                row = {
+                    "iter": it,
+                    "examples": len(train_examples),
+                    "pi_loss": pi_loss,
+                    "v_loss": v_loss,
+                    "arena": (nwins, owins, draws),
+                    "accepted": accepted,
+                    "warmup": warmup,
+                }
+                if self.eval_hook is not None:
+                    row.update(self.eval_hook(it, self.net))
+                self.metrics.append(row)
+                self._log(row)
+                self._append_csv(row)
+        finally:
+            if pool is not None:
+                pool.shutdown()
         return self.metrics
 
     def _append_csv(self, row):
