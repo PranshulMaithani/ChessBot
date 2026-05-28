@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 from tqdm import tqdm
 
-from src.core.mcts import MCTS
+from src.core.mcts_factory import make_mcts
 
 
 def play_game(game, player_pos, player_neg, max_moves=0):
@@ -52,9 +52,11 @@ def play_match(game, p1, p2, num_games, max_moves=0):
 
 
 def greedy_mcts_player(game, net, config):
-    """A player that picks the most-visited move from a fresh MCTS each turn."""
+    """A player that picks the most-visited move from a fresh MCTS each turn.
+    Uses :func:`make_mcts` so it picks up BatchedMCTS automatically when
+    ``mcts_batch_size > 1``."""
     def play(canon):
-        mcts = MCTS(game, net, config)
+        mcts = make_mcts(game, net, config)
         probs = mcts.get_action_prob(canon, temp=0, add_root_noise=False)
         return int(np.argmax(probs))
     return play

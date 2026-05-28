@@ -40,6 +40,18 @@ class NeuralNet:
             p = torch.softmax(logits, dim=1)[0]
         return p.cpu().numpy(), float(v.item())
 
+    def predict_batch(self, canonical_boards):
+        """Batched prediction. Takes a list of canonical boards; returns
+        (policies (B, A), values (B,)) as numpy arrays. The whole point of
+        BatchedMCTS — one GPU forward pass per K simulations instead of K."""
+        encoded = np.stack([self.game.encode(b) for b in canonical_boards])
+        x = torch.from_numpy(encoded).float().to(self.device)
+        self.model.eval()
+        with torch.no_grad():
+            logits, v = self.model(x)
+            p = torch.softmax(logits, dim=1)
+        return p.cpu().numpy(), v.cpu().numpy()
+
     def train(self, examples):
         """examples: list of (canonical_board, pi, z). Returns (avg_pi_loss, avg_v_loss)."""
         self.model.train()

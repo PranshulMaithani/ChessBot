@@ -19,12 +19,16 @@ class Config:
     c_puct: float = 1.5          # exploration constant in PUCT
     dirichlet_alpha: float = 0.5 # root noise concentration (smaller = peakier)
     dirichlet_eps: float = 0.25  # how much root noise to mix in during self-play
+    mcts_batch_size: int = 1     # >1 enables BatchedMCTS (parallel sims + batched net eval)
+    virtual_loss: float = 1.0    # how strongly to deter parallel sims from sharing a path
 
     # --- self-play ---
     num_iters: int = 15          # outer loop: (self-play -> train -> arena)
     selfplay_games: int = 40     # games generated per iteration
     temp_threshold: int = 6      # after this many plies, play greedily (temp->0)
     max_game_len: int = 0        # ply cap; 0 = no cap (adjudicate draw if hit)
+    resign_threshold: float = -1.0   # if value < this for N plies, resign; -1.0 disables
+    resign_n_consecutive: int = 4    # plies below threshold required to resign
 
     # --- training ---
     epochs: int = 10

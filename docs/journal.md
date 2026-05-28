@@ -4,6 +4,55 @@ A running log of decisions, experiments, and results. Newest entries on top.
 
 ---
 
+## 2026-05-28 — Day 2: Connect 4 success + Stage 2 engineering
+
+**Connect 4: trained from zero in ~3 hours.**
+- All 60 iterations completed.
+- pi_loss 1.67 -> 0.42, v_loss 0.31 -> 0.17.
+- vs random: 13/7/0 at iter 1 -> **20/0/0** by iter 26 and consistently after.
+  The bot reliably wins Connect 4 against a random mover. First real "trained
+  from zero by self-play" deliverable.
+- Plot: `docs/plots/connect4_progress.png`. Play it: `scripts/play_connect4.py`.
+
+**Chess: still plateauing on the laptop (as predicted).**
+- Warmup gate worked (iters 1-5 each ACCEPT). pi_loss collapsed 5.83 -> 1.08.
+- Iters 6-20 all-draws arena, all rejected -- the chess cold-start ceiling
+  (80 sims is just below the threshold for finding decisive lines from a fresh
+  net on bare boards). Iter 21 *did* get a marginal promotion (1/0/11).
+
+**Stage 2 engineering shipped (toward breaking the chess plateau)**
+- `src/core/batched_mcts.py`: BatchedMCTS with virtual loss. Runs `K`
+  simulations in parallel and evaluates their leaves in one GPU forward pass
+  -- the canonical AlphaZero speedup. Expected ~5-10x throughput on chess.
+- `src/nn/net.py::predict_batch`: GPU-batched policy/value inference.
+- `src/core/selfplay.py`: **resignation** -- if the net thinks the side to
+  move is losing badly for N plies, end the game with a real -1/+1 label.
+  Turns the value-uninformative "shuffle to the cap" into honest training
+  signal (the actual fix for the chess draw plateau).
+- `src/core/mcts_factory.py`: switches between simple/Batched MCTS by config.
+- New chess config: `mcts_batch_size=16`, `resign_threshold=-0.85`.
+
+**Cloud-ready**
+- `docs/CLOUD.md`: Kaggle (30h/week T4) and Colab (~12h, Drive-persisted)
+  setup with copy-pasteable cells and recommended config (`--mcts-batch 32
+  --channels 96 --res-blocks 8 --resign-threshold -0.85`).
+
+**Play the bots**
+- `scripts/play_connect4.py` (interactive, ASCII board).
+- `scripts/play.py` (chess; already existed).
+
+**Verified**
+- All test suites pass: TTT 4/4, Connect 4 8/8, chess 9/9, BatchedMCTS 4/4
+  (including the King-vs-King repetition regression at 200 sims with
+  `mcts_batch_size=16`).
+
+**Next**
+- Restart chess locally with `--resume`: should run faster and break the
+  draw plateau.
+- Push repo to GitHub, then start a Kaggle session for serious chess training.
+
+---
+
 ## 2026-05-28 — Day 1: triage + Connect 4 detour
 
 **Two things broke on the chess overnight run.**

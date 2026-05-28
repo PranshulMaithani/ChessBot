@@ -64,7 +64,15 @@ python scripts/train_chess.py          # Stage 1   : self-play chess (runs until
 python scripts/plot_metrics.py --csv runs/connect4_metrics.csv \
                                --out docs/plots/connect4_progress.png
 python scripts/play.py                 # play a game vs the trained chess bot
+python scripts/play_connect4.py        # play a game vs the trained Connect 4 bot
 ```
+
+## Cloud training (Kaggle / Colab)
+
+See [`docs/CLOUD.md`](docs/CLOUD.md) for Kaggle (30h/week T4) and Colab
+(~12h/session, Drive-persisted) setup. Recommended cloud config bumps
+`--sims 200 --mcts-batch 32 --channels 96 --res-blocks 8` for ~5x faster
+iterations on the better GPUs.
 
 Each trainer saves `models/<game>/latest.pt` every iteration and
 `models/<game>/best.pt` on each arena promotion, so runs are safe to Ctrl-C
