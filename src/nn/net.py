@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import optim
+from tqdm import tqdm
 
 from src.nn.model import AlphaZeroNet
 
@@ -49,7 +50,7 @@ class NeuralNet:
         n = len(examples)
         tot_pi = tot_v = 0.0
         n_batches = 0
-        for _ in range(self.config.epochs):
+        for _ in tqdm(range(self.config.epochs), desc="Training Network"):
             np.random.shuffle(examples)
             for i in range(0, n, bs):
                 batch = examples[i : i + bs]

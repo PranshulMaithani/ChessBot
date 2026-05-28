@@ -55,7 +55,7 @@ def parse_human(board, text):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--checkpoint", default="models/best.pt")
+    ap.add_argument("--checkpoint", default="models/chess/best.pt")
     ap.add_argument("--color", choices=["white", "black"], default="white")
     ap.add_argument("--sims", type=int, default=200)
     ap.add_argument("--channels", type=int, default=64)
@@ -64,18 +64,18 @@ def main():
     ap.add_argument("--test", action="store_true", help="make one bot move and exit")
     args = ap.parse_args()
 
-    cfg = Config(num_channels=args.channels, num_res_blocks=args.res_blocks,
-                 num_sims=args.sims, device="cpu" if args.cpu else "cuda")
-    game = ChessGame()
-    net = NeuralNet(game, cfg)
-
     ckpt = args.checkpoint
     if not os.path.exists(ckpt):
-        alt = os.path.join(cfg.checkpoint_dir, "latest.pt")
+        alt = os.path.join(os.path.dirname(ckpt) or "models", "latest.pt")
         if os.path.exists(alt):
             ckpt = alt
         else:
             raise SystemExit(f"no checkpoint found ({args.checkpoint}); train first")
+    cfg = Config(num_channels=args.channels, num_res_blocks=args.res_blocks,
+                 num_sims=args.sims, device="cpu" if args.cpu else "cuda",
+                 checkpoint_dir=os.path.dirname(ckpt) or "models")
+    game = ChessGame()
+    net = NeuralNet(game, cfg)
     net.load_checkpoint(os.path.basename(ckpt))
     print(f"loaded {ckpt}  (sims={cfg.num_sims}, device={net.device})")
 

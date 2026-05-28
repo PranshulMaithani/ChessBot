@@ -36,6 +36,7 @@ class Config:
     # --- arena (gatekeeping) ---
     arena_games: int = 24
     update_threshold: float = 0.55  # new net must win this share of decided games
+    warmup_iters: int = 0           # first N iters: skip the gate, always accept
 
     # --- io / misc ---
     device: str = "cuda"         # falls back to cpu automatically if unavailable

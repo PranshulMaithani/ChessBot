@@ -4,6 +4,50 @@ A running log of decisions, experiments, and results. Newest entries on top.
 
 ---
 
+## 2026-05-28 — Day 1: triage + Connect 4 detour
+
+**Two things broke on the chess overnight run.**
+
+1. **Silent crash on iter 1.** Native stack overflow from MCTS recursing
+   infinitely through cycles of fully-expanded positions (a weak net wanders
+   into King-vs-King-style shuffles, those positions all expand, and a later
+   simulation descends through the cycle forever — no Python traceback because
+   the C stack dies first). Patched in-session: MCTS now tracks states visited
+   in the current descent and treats repetition as a draw, with a
+   `MAX_SEARCH_DEPTH` backstop. Locked in by a new regression test
+   (`test_mcts_terminates_on_repetition_cycles` — King-vs-King at 200 sims).
+
+2. **14 iterations ran but the net never left initialization.** Arena rejected
+   nearly every candidate (iter 1: 0-11-1, then mostly 1-8-3 sort of patterns),
+   so coach reloaded `temp.pt` each time. Cold-start failure: 80 sims on an
+   untrained net is essentially a random walk, 200-ply self-play games are
+   adjudicated as draws (value ~ 0), so training perturbs the net into
+   worse-than-uniform territory and the gate (correctly) rejects it. Forever.
+   Also: `play_game` had no length cap, so arena ate ~60% of each iteration.
+
+**Fixes shipped**
+- `play_game` / `play_match` accept `max_moves`; chess passes
+  `max_game_len=200` to the arena too.
+- coach: optional warmup phase skips the arena and unconditionally accepts
+  the trained candidate for the first N iters; chess uses `warmup_iters=5`.
+- chess `update_threshold` 0.55 -> 0.52 (12 arena games is too noisy for 0.55).
+- per-game checkpoint dirs: `models/chess/`, `models/connect4/`,
+  `models/tictactoe/` (so runs of different games don't overwrite each other).
+
+**Stage 0.5: Connect 4 (built today)**
+- `src/games/connect4.py` + 8 passing tests + `scripts/train_connect4.py`.
+- Smoke run: a 16-channel untrained net + 10 MCTS sims already won 17 / 20
+  vs a random opponent. Connect 4 produces decisive games immediately, so
+  the value head gets honest signal from iteration 1 — exactly what chess
+  cold-start lacks on this hardware.
+
+**Plan**
+- Tonight: `train_connect4.py` (a few hours, will show a real learning curve).
+- Then revisit chess with the fixes; arena gate now actually lets the net
+  evolve.
+
+---
+
 ## 2026-05-28 — Stage 1: chess pipeline live
 
 **Goal:** plug chess into the validated core and start a self-play run.

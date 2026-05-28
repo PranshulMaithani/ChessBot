@@ -17,6 +17,8 @@ import json
 import os
 from collections import deque
 
+from tqdm import tqdm
+
 from src.core.arena import greedy_mcts_player, play_match
 from src.core.selfplay import execute_episode
 from src.nn.net import NeuralNet
@@ -35,9 +37,10 @@ class Coach:
     def learn(self):
         prev_net = NeuralNet(self.game, self.config)
         for it in range(1, self.config.num_iters + 1):
+            print(f"\n{'='*20} Iteration {it}/{self.config.num_iters} {'='*20}")
             # 1) self-play
             iter_examples = []
-            for _ in range(self.config.selfplay_games):
+            for _ in tqdm(range(self.config.selfplay_games), desc="Self-Play", unit="game"):
                 iter_examples += execute_episode(self.game, self.net, self.config)
             self.history.append(iter_examples)
             train_examples = [e for batch in self.history for e in batch]
@@ -47,18 +50,28 @@ class Coach:
             prev_net.load_checkpoint("temp.pt")
             pi_loss, v_loss = self.net.train(train_examples)
 
-            # 3) gate: candidate vs previous
-            new_p = greedy_mcts_player(self.game, self.net, self.config)
-            old_p = greedy_mcts_player(self.game, prev_net, self.config)
-            nwins, owins, draws = play_match(self.game, new_p, old_p, self.config.arena_games)
-            decided = nwins + owins
-            frac = nwins / decided if decided else 0.0
-            accepted = frac >= self.config.update_threshold
-
-            if accepted:
+            # 3) gate: warmup iterations skip the arena and always accept the
+            #    trained candidate (so the net can leave initialization before
+            #    a noisy gate starts filtering); after that, standard head-to-head.
+            warmup = it <= self.config.warmup_iters
+            if warmup:
+                nwins = owins = draws = 0
+                accepted = True
                 self.net.save_checkpoint("best.pt")
             else:
-                self.net.load_checkpoint("temp.pt")  # revert to previous weights
+                new_p = greedy_mcts_player(self.game, self.net, self.config)
+                old_p = greedy_mcts_player(self.game, prev_net, self.config)
+                nwins, owins, draws = play_match(
+                    self.game, new_p, old_p, self.config.arena_games,
+                    max_moves=self.config.max_game_len,
+                )
+                decided = nwins + owins
+                accepted = (decided > 0
+                            and nwins / decided >= self.config.update_threshold)
+                if accepted:
+                    self.net.save_checkpoint("best.pt")
+                else:
+                    self.net.load_checkpoint("temp.pt")  # revert to previous weights
             # always save the latest weights so a long run is resumable / crash-safe
             self.net.save_checkpoint("latest.pt")
 
@@ -69,6 +82,7 @@ class Coach:
                 "v_loss": v_loss,
                 "arena": (nwins, owins, draws),
                 "accepted": accepted,
+                "warmup": warmup,
             }
             if self.eval_hook is not None:
                 row.update(self.eval_hook(it, self.net))
@@ -82,7 +96,7 @@ class Coach:
             return
         os.makedirs(os.path.dirname(self.metrics_csv) or ".", exist_ok=True)
         nwins, owins, draws = row["arena"]
-        skip = {"iter", "pi_loss", "v_loss", "arena", "accepted", "examples"}
+        skip = {"iter", "pi_loss", "v_loss", "arena", "accepted", "examples", "warmup"}
         flat = {
             "iter": row["iter"],
             "examples": row["examples"],
@@ -92,6 +106,7 @@ class Coach:
             "arena_old": owins,
             "arena_draw": draws,
             "accepted": int(row["accepted"]),
+            "warmup": int(row.get("warmup", False)),
             "extra": json.dumps({k: v for k, v in row.items() if k not in skip}),
         }
         write_header = not os.path.exists(self.metrics_csv)
@@ -107,8 +122,8 @@ class Coach:
             f"[iter {row['iter']:>2}] "
             f"pi_loss={row['pi_loss']:.3f} v_loss={row['v_loss']:.3f} "
             f"arena(new/old/draw)={row['arena']} "
-            f"{'ACCEPT' if row['accepted'] else 'reject'}"
+            f"{('ACCEPT(warmup)' if row.get('warmup') else ('ACCEPT' if row['accepted'] else 'reject'))}"
         )
-        skip = {"iter", "pi_loss", "v_loss", "arena", "accepted", "examples"}
+        skip = {"iter", "pi_loss", "v_loss", "arena", "accepted", "examples", "warmup"}
         extra = "  ".join(f"{k}={v}" for k, v in row.items() if k not in skip)
         print(base + ("  " + extra if extra else ""), flush=True)

@@ -60,7 +60,9 @@ def chess_config(args) -> Config:
         weight_decay=1e-4,
         replay_window=8,
         arena_games=12,
-        update_threshold=0.55,
+        update_threshold=0.52,   # 12 arena games is too noisy for a 0.55 bar
+        warmup_iters=5,          # let the net leave initialization before gating
+        checkpoint_dir="models/chess",
     )
     if args.smoke:
         cfg.num_iters, cfg.selfplay_games, cfg.num_sims = 1, 2, 8
@@ -115,7 +117,7 @@ def main():
         # Cheap probe: raw-policy (no search) vs random. A learning net should
         # beat random quickly and decisively.
         me = raw_policy_player(game, current_net)
-        w, l, d = play_match(game, me, rnd, args.eval_games)
+        w, l, d = play_match(game, me, rnd, args.eval_games, max_moves=cfg.max_game_len)
         return {"vs_random[W/L/D]": (w, l, d)}
 
     coach = Coach(game, net, cfg, eval_hook=eval_hook, metrics_csv=METRICS_CSV)

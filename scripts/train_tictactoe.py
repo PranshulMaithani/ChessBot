@@ -68,6 +68,7 @@ def build_config(args):
     if args.cpu:
         cfg.device = "cpu"
     cfg.seed = args.seed
+    cfg.checkpoint_dir = "models/tictactoe"
     return cfg
 
 

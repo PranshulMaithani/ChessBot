@@ -50,18 +50,25 @@ pip install -r requirements.txt
 ## Run
 
 ```bash
-python tests/test_games.py            # sanity-check Tic-Tac-Toe
-python tests/test_chess.py            # sanity-check the chess adapter
+python tests/test_games.py             # sanity-check Tic-Tac-Toe
+python tests/test_connect4.py          # sanity-check Connect 4
+python tests/test_chess.py             # sanity-check the chess adapter (incl. MCTS regression)
 
-python scripts/train_tictactoe.py     # Stage 0: converges to perfect play
+python scripts/train_tictactoe.py      # Stage 0   : converges to perfect play (minutes)
+python scripts/train_connect4.py       # Stage 0.5 : decisive learning signal (hours)
+python scripts/train_chess.py          # Stage 1   : self-play chess (runs until stopped)
 
-python scripts/train_chess.py         # Stage 1: self-play chess (runs until stopped)
-python scripts/train_chess.py --resume   # continue from models/latest.pt
-python scripts/plot_metrics.py        # draw the learning curve -> docs/plots/
+# All trainers support:
+#   --resume         continue from models/<game>/latest.pt
+#   --smoke          tiny end-to-end sanity run
+python scripts/plot_metrics.py --csv runs/connect4_metrics.csv \
+                               --out docs/plots/connect4_progress.png
+python scripts/play.py                 # play a game vs the trained chess bot
 ```
 
-Training saves `models/latest.pt` every iteration and `models/best.pt` on each
-arena promotion, so it is safe to Ctrl-C and `--resume`.
+Each trainer saves `models/<game>/latest.pt` every iteration and
+`models/<game>/best.pt` on each arena promotion, so runs are safe to Ctrl-C
+and `--resume`. Per-iteration metrics land in `runs/<game>_metrics.csv`.
 
 ## Journal
 

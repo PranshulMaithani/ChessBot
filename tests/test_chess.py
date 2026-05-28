@@ -122,6 +122,24 @@ def test_selfplay_loop_consistency():
         random_chess_game_terminates(game, seed, cap=300)
 
 
+def test_mcts_terminates_on_repetition_cycles():
+    """Regression: King-vs-King has only shuffling moves and trivially produces
+    repeated positions. The original recursive MCTS infinitely descended through
+    fully-expanded position cycles and silently overflowed the C stack on the
+    real chess training run. This call must return quickly."""
+    from src.config import Config
+    from src.core.mcts import MCTS
+    from src.nn.net import NeuralNet
+    game = ChessGame()
+    cfg = Config(num_channels=8, num_res_blocks=1, num_sims=200, device="cpu")
+    net = NeuralNet(game, cfg)
+    board = chess.Board("4k3/8/8/8/8/8/8/4K3 w - - 0 1")  # bare kings only
+    mcts = MCTS(game, net, cfg)
+    probs = mcts.get_action_prob(board, temp=0)
+    assert probs.shape == (ACTION_SIZE,)
+    assert probs.sum() > 0
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
