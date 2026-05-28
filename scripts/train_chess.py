@@ -77,7 +77,8 @@ def chess_config(args) -> Config:
         ("num_sims", args.sims), ("num_channels", args.channels),
         ("num_res_blocks", args.res_blocks), ("arena_games", args.arena),
         ("mcts_batch_size", args.mcts_batch), ("resign_threshold", args.resign_threshold),
-        ("warmup_iters", args.warmup),
+        ("warmup_iters", args.warmup), ("selfplay_workers", args.workers),
+        ("selfplay_worker_device", args.worker_device),
     ]:
         if val is not None:
             setattr(cfg, attr, val)
@@ -98,6 +99,8 @@ def main():
     ap.add_argument("--mcts-batch", type=int, help="parallel MCTS sims per net call (>1 enables BatchedMCTS)")
     ap.add_argument("--resign-threshold", type=float, help="net value below which a side resigns; -1 disables")
     ap.add_argument("--warmup", type=int, help="warmup iterations skipping the arena gate")
+    ap.add_argument("--workers", type=int, help="parallel self-play worker processes (default 1 = sequential)")
+    ap.add_argument("--worker-device", choices=["cpu", "cuda"], help="device for self-play workers (default cpu; cuda is faster per game but contends for GPU memory)")
     ap.add_argument("--eval-games", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--cpu", action="store_true")

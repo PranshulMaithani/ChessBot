@@ -27,6 +27,8 @@ class Config:
     selfplay_games: int = 40     # games generated per iteration
     temp_threshold: int = 6      # after this many plies, play greedily (temp->0)
     max_game_len: int = 0        # ply cap; 0 = no cap (adjudicate draw if hit)
+    selfplay_workers: int = 1    # >1 spawns parallel self-play worker processes
+    selfplay_worker_device: str = "cpu"   # "cpu" (no GPU contention) or "cuda"
     resign_threshold: float = -1.0   # if value < this for N plies, resign; -1.0 disables
     resign_n_consecutive: int = 4    # plies below threshold required to resign
 

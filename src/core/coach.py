@@ -38,10 +38,23 @@ class Coach:
         prev_net = NeuralNet(self.game, self.config)
         for it in range(1, self.config.num_iters + 1):
             print(f"\n{'='*20} Iteration {it}/{self.config.num_iters} {'='*20}")
-            # 1) self-play
-            iter_examples = []
-            for _ in tqdm(range(self.config.selfplay_games), desc="Self-Play", unit="game"):
-                iter_examples += execute_episode(self.game, self.net, self.config)
+            # 1) self-play (parallel workers when configured)
+            workers = getattr(self.config, "selfplay_workers", 1)
+            if workers > 1:
+                from src.core.parallel_selfplay import parallel_selfplay
+                print(f"  spawning {workers} self-play workers "
+                      f"on {getattr(self.config, 'selfplay_worker_device', 'cpu')} "
+                      f"for {self.config.selfplay_games} games...", flush=True)
+                iter_examples = parallel_selfplay(
+                    self.game, self.net, self.config,
+                    self.config.selfplay_games, workers,
+                    worker_device=getattr(self.config, "selfplay_worker_device", "cpu"),
+                )
+                print(f"  self-play done: {len(iter_examples):,} examples", flush=True)
+            else:
+                iter_examples = []
+                for _ in tqdm(range(self.config.selfplay_games), desc="Self-Play", unit="game"):
+                    iter_examples += execute_episode(self.game, self.net, self.config)
             self.history.append(iter_examples)
             train_examples = [e for batch in self.history for e in batch]
 
