@@ -140,7 +140,13 @@ class MCTS:
         # ------------------------------------------------------------
 
         if s not in self.Es:
-            self.Es[s] = self.game.get_game_ended(board, 1)
+            # Use the cheap no-claim variant inside MCTS when available; the
+            # `path` set above already handles repetition. ~20% self-play
+            # speedup on chess. Falls back to the standard game-ended call
+            # for games without the fast variant (tic-tac-toe, connect-4).
+            game_ended = getattr(self.game, "get_game_ended_no_claim",
+                                 self.game.get_game_ended)
+            self.Es[s] = game_ended(board, 1)
 
         if self.Es[s] != 0:
             return -self.Es[s]

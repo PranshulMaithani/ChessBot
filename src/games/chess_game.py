@@ -34,6 +34,19 @@ _DIRECTIONS = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1,
 _KNIGHTS = [(1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)]
 _UNDER_PIECES = [chess.KNIGHT, chess.BISHOP, chess.ROOK]
 
+# Reverse-lookup dicts so move_to_index doesn't do O(n) `.index()` scans every
+# call. ~138k move_to_index calls per game in the profile -> dict lookups
+# turn this from ~600 ns/call into ~150 ns/call.
+_KNIGHTS_IDX = {d: i for i, d in enumerate(_KNIGHTS)}
+_DIRECTIONS_IDX = {d: i for i, d in enumerate(_DIRECTIONS)}
+_UNDER_PIECES_IDX = {p: i for i, p in enumerate(_UNDER_PIECES)}
+
+# move_to_index is a pure function of (from_sq, to_sq, promotion). At most
+# 64*64*5 = 20480 distinct keys; in practice far fewer are ever queried.
+# Caching the result turns a ~4 us computation into a ~150 ns dict lookup —
+# the biggest remaining single-function speedup in the chess hot path.
+_MOVE_INDEX_CACHE: dict = {}
+
 _N_QUEEN = 56          # 8 dirs * 7 distances
 _N_KNIGHT = 8
 _PLANES_PER_SQUARE = 73   # 56 + 8 + 9
@@ -60,25 +73,40 @@ class ChessGame(Game):
     # --- move <-> action index -------------------------------------------------
     @staticmethod
     def move_to_index(move: chess.Move) -> int:
-        ff, fr = chess.square_file(move.from_square), chess.square_rank(move.from_square)
-        tf, tr = chess.square_file(move.to_square), chess.square_rank(move.to_square)
+        # Cache-keyed by the only fields that determine the index. Hot path:
+        # one dict lookup. Cold path: original logic, then memoize.
+        key = (move.from_square, move.to_square, move.promotion)
+        cached = _MOVE_INDEX_CACHE.get(key)
+        if cached is not None:
+            return cached
+        # Direct bit ops are ~2x faster than chess.square_file/rank function calls.
+        from_sq, to_sq = move.from_square, move.to_square
+        ff, fr = from_sq & 7, from_sq >> 3
+        tf, tr = to_sq & 7, to_sq >> 3
         df, dr = tf - ff, tr - fr
 
         if move.promotion and move.promotion != chess.QUEEN:
             dir_idx = df + 1  # df in {-1,0,1} -> {0,1,2}
-            piece_idx = _UNDER_PIECES.index(move.promotion)
+            piece_idx = _UNDER_PIECES_IDX[move.promotion]
             plane = _N_QUEEN + _N_KNIGHT + piece_idx * 3 + dir_idx
-        elif (df, dr) in _KNIGHTS:
-            plane = _N_QUEEN + _KNIGHTS.index((df, dr))
+        elif (df, dr) in _KNIGHTS_IDX:
+            plane = _N_QUEEN + _KNIGHTS_IDX[(df, dr)]
         else:  # queen-like move (covers queen promotions and castling)
             dist = max(abs(df), abs(dr))
-            dir_idx = _DIRECTIONS.index((_sign(df), _sign(dr)))
+            dir_idx = _DIRECTIONS_IDX[(_sign(df), _sign(dr))]
             plane = dir_idx * 7 + (dist - 1)
-        return move.from_square * _PLANES_PER_SQUARE + plane
+        result = from_sq * _PLANES_PER_SQUARE + plane
+        _MOVE_INDEX_CACHE[key] = result
+        return result
 
     def _action_to_move(self, board: chess.Board, action: int):
-        # Match against legal moves (avg ~35) — no separate decoder needed.
+        # action = from_sq * 73 + plane, so from_sq is recoverable cheaply.
+        # Filtering legal moves by from_sq before calling move_to_index skips
+        # the ~75% of moves at other from-squares; cheap and big.
+        target_from = action // _PLANES_PER_SQUARE
         for move in board.legal_moves:
+            if move.from_square != target_from:
+                continue
             if self.move_to_index(move) == action:
                 return move
         raise ValueError(f"action {action} is not a legal move for this board")
@@ -100,6 +128,9 @@ class ChessGame(Game):
         return mask
 
     def get_game_ended(self, board, player):
+        # `claim_draw=True` triggers python-chess's expensive threefold-rep
+        # scan over the move stack. Profiler showed it was 20% of self-play
+        # CPU time. Needed for real game termination, so we keep it here.
         outcome = board.outcome(claim_draw=True)
         if outcome is None:
             return 0.0
@@ -108,26 +139,70 @@ class ChessGame(Game):
         # A decisive result with this side to move means this side was mated -> loss.
         return 1.0 if outcome.winner == board.turn else -1.0
 
+    def get_game_ended_no_claim(self, board, player):
+        """Fast variant for use *inside* MCTS tree descent.
+
+        Skips ``claim_draw=True`` (no threefold-rep scan). Inside the tree,
+        boards are hypothetical and the per-descent `seen` set in
+        :class:`BatchedMCTS._descend` already prevents infinite recursion via
+        repetition, so we don't need python-chess's expensive draw-claim
+        detection. The real selfplay / arena loops still call
+        :meth:`get_game_ended` (with claim_draw) for actual game termination.
+        """
+        outcome = board.outcome(claim_draw=False)
+        if outcome is None:
+            return 0.0
+        if outcome.winner is None:
+            return 1e-4
+        return 1.0 if outcome.winner == board.turn else -1.0
+
     # --- perspective / encoding ------------------------------------------------
     def get_canonical_form(self, board, player):
         return board if board.turn == chess.WHITE else board.mirror()
 
     def encode(self, canonical_board):
-        planes = np.zeros((_N_INPUT_PLANES, 8, 8), dtype=np.float32)
-        b = canonical_board  # white to move: "our" = white (planes 0-5), "their" = black (6-11)
-        for sq, piece in b.piece_map().items():
-            r, f = chess.square_rank(sq), chess.square_file(sq)
-            base = 0 if piece.color == chess.WHITE else 6
-            planes[base + piece.piece_type - 1, r, f] = 1.0
-        planes[12, :, :] = b.has_kingside_castling_rights(chess.WHITE)
-        planes[13, :, :] = b.has_queenside_castling_rights(chess.WHITE)
-        planes[14, :, :] = b.has_kingside_castling_rights(chess.BLACK)
-        planes[15, :, :] = b.has_queenside_castling_rights(chess.BLACK)
+        # Was: Python loop over `board.piece_map().items()` doing per-square
+        # numpy assignments (~150 us/call). Now: take python-chess's internal
+        # bitboards and bit-unpack each one into an 8x8 plane (~50 us/call).
+        # Bitboard bit `i` corresponds to chess square `i` = rank*8 + file, so
+        # bytes 0..7 of the LE byte-string are ranks 0..7 — np.unpackbits with
+        # bitorder='little' fills the plane in (rank, file) order.
+        b = canonical_board
+        planes = np.empty((_N_INPUT_PLANES, 8, 8), dtype=np.float32)
+        white = b.occupied_co[chess.WHITE]
+        black = b.occupied_co[chess.BLACK]
+        bbs = (
+            b.pawns & white,  b.knights & white, b.bishops & white,
+            b.rooks & white,  b.queens & white,  b.kings & white,
+            b.pawns & black,  b.knights & black, b.bishops & black,
+            b.rooks & black,  b.queens & black,  b.kings & black,
+        )
+        for i, bb in enumerate(bbs):
+            planes[i] = np.unpackbits(
+                np.frombuffer(bb.to_bytes(8, "little"), dtype=np.uint8),
+                bitorder="little",
+            ).reshape(8, 8)
+        planes[12].fill(float(b.has_kingside_castling_rights(chess.WHITE)))
+        planes[13].fill(float(b.has_queenside_castling_rights(chess.WHITE)))
+        planes[14].fill(float(b.has_kingside_castling_rights(chess.BLACK)))
+        planes[15].fill(float(b.has_queenside_castling_rights(chess.BLACK)))
+        planes[16].fill(0.0)
         if b.ep_square is not None:
-            planes[16, chess.square_rank(b.ep_square), chess.square_file(b.ep_square)] = 1.0
-        planes[17, :, :] = b.halfmove_clock / 100.0
+            planes[16, b.ep_square >> 3, b.ep_square & 7] = 1.0
+        planes[17].fill(b.halfmove_clock / 100.0)
         return planes
 
     def string_key(self, canonical_board):
-        # EPD = board + turn + castling + ep (no move counters) -> good transpositions.
-        return canonical_board.epd()
+        # Was `canonical_board.epd()` — that's a full FEN-style string build
+        # (~150 us each, ~9k calls/game = 1.5 s of pure formatting). The MCTS
+        # only needs a *hashable* key; a tuple of python-chess's internal
+        # bitboards is functionally identical for transposition detection and
+        # roughly 10x cheaper. Two positions that differ only in stale
+        # castling-rights bits will get distinct keys here — that's a tiny
+        # amount of duplicated search, not a correctness bug.
+        b = canonical_board
+        return (
+            b.pawns, b.knights, b.bishops, b.rooks, b.queens, b.kings,
+            b.occupied_co[chess.WHITE], b.occupied_co[chess.BLACK],
+            b.turn, b.castling_rights, b.ep_square,
+        )

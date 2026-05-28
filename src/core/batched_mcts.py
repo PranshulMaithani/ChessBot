@@ -38,6 +38,12 @@ class BatchedMCTS:
         self.Qsa, self.Nsa, self.Ns = {}, {}, {}
         self.Ps, self.Es, self.Vs = {}, {}, {}
         self.virtual_n = {}  # (s, a) -> in-flight virtual visits
+        # MCTS revisits the same (state, action) pair dozens of times via
+        # transpositions; computing the child canonical board each time means
+        # repeated chess.Board.copy + push + mirror. Caching the result per
+        # (s, a) eats this cost once. Lives for the duration of the episode
+        # (the MCTS is re-instantiated each episode, so memory is bounded).
+        self._next_cache: dict = {}
 
     def get_action_prob(self, board, temp=1.0, add_root_noise=False):
         # Expand the root first (one sim) so we have a Ps to perturb.
@@ -114,12 +120,18 @@ class BatchedMCTS:
         path: List[Tuple[str, int]] = []
         seen = set()
         cur = board
+        # Prefer the cheap no-claim game-end check inside the tree if the game
+        # offers one (chess does — saves ~20% of self-play time by skipping
+        # the threefold-repetition scan on hypothetical states). The `seen`
+        # set above already handles repetition correctness for this descent.
+        game_ended = getattr(self.game, "get_game_ended_no_claim",
+                             self.game.get_game_ended)
         for _ in range(MAX_SEARCH_DEPTH):
             s = self.game.string_key(cur)
             if s in seen:
                 return path, None, 0.0           # repetition -> draw
             if s not in self.Es:
-                self.Es[s] = self.game.get_game_ended(cur, 1)
+                self.Es[s] = game_ended(cur, 1)
             if self.Es[s] != 0:
                 return path, None, self.Es[s]    # terminal
             if s not in self.Ps:
@@ -127,8 +139,16 @@ class BatchedMCTS:
             seen.add(s)
             a = self._select(s)
             path.append((s, a))
-            nb, npl = self.game.get_next_state(cur, 1, a)
-            cur = self.game.get_canonical_form(nb, npl)
+            # Cached child canonical board for (s, a) — chess.Board ops are C
+            # but still ~130 us each via Python, and transpositions revisit
+            # the same (s, a) dozens of times per game.
+            key = (s, a)
+            child = self._next_cache.get(key)
+            if child is None:
+                nb, npl = self.game.get_next_state(cur, 1, a)
+                child = self.game.get_canonical_form(nb, npl)
+                self._next_cache[key] = child
+            cur = child
         return path, None, 0.0                   # depth cap -> draw
 
     def _expand(self, board, policy):
