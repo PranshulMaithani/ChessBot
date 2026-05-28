@@ -4,6 +4,43 @@ A running log of decisions, experiments, and results. Newest entries on top.
 
 ---
 
+## 2026-05-28 — Day 2 (cont.): supervised pretraining pipeline
+
+**The pragmatic answer to chess cold-start: AlphaGo-style hybrid.**
+Pure AlphaZero takes days on this hardware to break out of "shuffle to draw".
+Pretrain the same net on human master games first; self-play continues from
+there. AlphaGo (the predecessor) did this and was world-champion strong.
+
+**Shipped**
+- `src/data/pgn.py`: PGN → `(planes, action_idx, z)` extraction. Reuses
+  `ChessGame.encode` and `move_to_index` so the net architecture / checkpoints
+  are identical between supervised pretraining and self-play.
+- `scripts/pretrain_chess.py`: supervised training loop (policy CE on the
+  played move, value MSE on the game outcome). Same losses as self-play, just
+  with human-game targets instead of MCTS targets. Saves
+  `models/chess/pretrained.pt`.
+- `scripts/train_chess.py --init-from <path>`: warm-start the self-play
+  trainer from a checkpoint (e.g. the pretrained one).
+- `docs/DATA.md`: download instructions, Lichess Elite default.
+
+**Verified**
+- 6 new PGN tests pass: mirror-move round-trip, white-perspective value
+  targets in a white-won game (and inverse for black-won), Elo filter,
+  skip-book advance, max-positions cap. All other suites green (31 tests
+  total).
+
+**Why this is expected to work where pure self-play stalled**
+- Value head sees real ±1 outcomes from move 1 instead of mostly-zero draws.
+- Policy head learns chess move shapes (opening principles, tactics) before
+  MCTS ever runs.
+- Resignation (Stage 2 fix) actually fires correctly once the value head is
+  calibrated.
+- BatchedMCTS (Stage 2 fix) makes the self-play continuation 5-10x faster.
+- Combined: the chess self-play loop becomes productive on a laptop GPU
+  instead of slogging at the plateau.
+
+---
+
 ## 2026-05-28 — Day 2: Connect 4 success + Stage 2 engineering
 
 **Connect 4: trained from zero in ~3 hours.**

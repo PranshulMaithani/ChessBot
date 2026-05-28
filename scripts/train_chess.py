@@ -102,6 +102,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--cpu", action="store_true")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--init-from", help="warm-start from a pretrained checkpoint (e.g. from pretrain_chess.py); ignored if --resume finds latest.pt")
     ap.add_argument("--smoke", action="store_true")
     args = ap.parse_args()
 
@@ -118,7 +119,11 @@ def main():
 
     if args.resume and os.path.exists(os.path.join(cfg.checkpoint_dir, "latest.pt")):
         net.load_checkpoint("latest.pt")
-        print("resumed from models/latest.pt")
+        print(f"resumed from {cfg.checkpoint_dir}/latest.pt")
+    elif args.init_from and os.path.exists(args.init_from):
+        ckpt = torch.load(args.init_from, map_location=net.device)
+        net.model.load_state_dict(ckpt["state_dict"])
+        print(f"warm-started from {args.init_from}")
 
     rnd = random_player(game)
 

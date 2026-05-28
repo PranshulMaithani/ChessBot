@@ -74,6 +74,22 @@ See [`docs/CLOUD.md`](docs/CLOUD.md) for Kaggle (30h/week T4) and Colab
 `--sims 200 --mcts-batch 32 --channels 96 --res-blocks 8` for ~5x faster
 iterations on the better GPUs.
 
+## Supervised pretraining (the chess cold-start fix)
+
+Pure self-play on chess takes days on a laptop. Pretraining the same net on
+human master games gives it chess knowledge before iteration 1, and the
+self-play loop refines from there (this is the AlphaGo path; pragmatic
+optimum for limited compute).
+
+```bash
+# 1) download a PGN — see docs/DATA.md (default: Lichess Elite)
+# 2) supervised pretraining (~1-3 hours; great fit for a Kaggle session)
+python scripts/pretrain_chess.py --pgn data/lichess_elite_2024-10.pgn
+
+# 3) self-play continues from the pretrained net
+python scripts/train_chess.py --init-from models/chess/pretrained.pt
+```
+
 Each trainer saves `models/<game>/latest.pt` every iteration and
 `models/<game>/best.pt` on each arena promotion, so runs are safe to Ctrl-C
 and `--resume`. Per-iteration metrics land in `runs/<game>_metrics.csv`.
