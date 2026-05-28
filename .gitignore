@@ -6,10 +6,11 @@ __pycache__/
 .venv/
 venv/
 
-# Project artifacts (large / regenerable)
-models/
-data/
-runs/
+# Project artifacts (large / regenerable). Anchored with leading `/` so the
+# `data/` rule doesn't accidentally swallow `src/data/`.
+/models/
+/data/
+/runs/
 *.pt
 *.pth
 *.ckpt
