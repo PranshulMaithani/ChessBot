@@ -1,8 +1,14 @@
-# Pretrain Chess on Kaggle — copy-paste cells
+# Pretrain Chess on Kaggle — copy-paste cells (128ch × 10 blocks)
 
 Walks through pretraining the chess net on a Lichess Elite PGN via a free
 Kaggle GPU session. Run this once; download the resulting `pretrained.pt`;
 then continue with self-play locally via `--init-from`.
+
+> **Architecture: 128 channels × 10 residual blocks.** This is the
+> "use my 8 GB VRAM" preset — substantially stronger ceiling than the older
+> 96×8 default. If you want the smaller 96×8 net (faster iters, lower
+> ceiling), swap `--channels 96 --res-blocks 8` in Cells 3.5 and 4 and use
+> `--batch-size 512` instead of `384`.
 
 ## Before you start
 
@@ -51,8 +57,8 @@ You should see a `Tesla T4` or `P100`. If you see nothing, the accelerator setti
 
 If the download 404s, that month isn't hosted anymore — open
 https://database.nikonoel.fr/ in your browser, pick any month listed, and
-swap the year-month in the URL above. Then adjust `--pgn` in Cell 4 to match
-the extracted `.pgn` filename.
+swap the year-month in the URL above. Then adjust `--pgn` in Cells 3.5 and 4
+to match the extracted `.pgn` filename.
 
 ---
 
@@ -62,41 +68,49 @@ the extracted `.pgn` filename.
 !python scripts/pretrain_chess.py \
     --pgn data/lichess_elite_2024-10.pgn \
     --max-positions 30000 --epochs 1 \
-    --channels 64 --res-blocks 4 \
+    --channels 128 --res-blocks 10 \
     --batch-size 256 \
     --out models/chess/_smoke.pt
 ```
 
-Use this to confirm the pipeline runs end-to-end before committing 45+ min
+Use this to confirm the pipeline runs end-to-end before committing 90+ min
 to the real run. Delete the smoke checkpoint afterwards:
 `!rm models/chess/_smoke.pt`.
 
+If you see OOM here, drop `--batch-size` to `192`.
+
 ---
 
-## Cell 4 — pretrain  *(Code, ~45–90 min on T4)*
+## Cell 4 — pretrain  *(Code, ~60–120 min on T4)*
 
 ```python
 !python scripts/pretrain_chess.py \
     --pgn data/lichess_elite_2024-10.pgn \
     --max-positions 800000 --epochs 4 \
-    --channels 96 --res-blocks 8 \
-    --batch-size 512
+    --channels 128 --res-blocks 10 \
+    --batch-size 384
 ```
+
+`--batch-size 384` is the safe-margin value for 128×10 on T4 (15 GB VRAM).
+If you get OOM, drop to 256. If VRAM utilisation stays well under 10 GB on
+the first few batches, you can bump to 512 for ~25% faster epochs.
 
 You'll see per-epoch lines like:
 
 ```
-epoch 1/4  train pi=4.21 v=0.61 top1=0.18  |  val pi=4.05 v=0.55 top1=0.21  (370.2s)
+epoch 1/4  train pi=4.21 v=0.61 top1=0.18  |  val pi=4.05 v=0.55 top1=0.21  (480.5s)
 ```
 
 What to watch:
 - **`top1`** = "how often net's argmax matches the actually-played master move."
-  Starts ~0.07 (random over 14 legal moves), should climb past **0.40** by the
-  last epoch. That's roughly club-player accuracy.
-- **`pi`** = policy cross-entropy — should drop ~4.5 → ~2.5.
-- **`v`** = value MSE — should drop ~0.6 → ~0.35.
+  Starts ~0.07 (random over 14 legal moves), should climb past **0.42** by the
+  last epoch with the bigger 128×10 net (vs ~0.40 for 96×8).
+- **`pi`** = policy cross-entropy — should drop ~4.5 → ~2.4.
+- **`v`** = value MSE — should drop ~0.6 → ~0.32.
 - **`val` columns** track held-out positions — `val` close to `train` means
   no overfitting, `val` >> `train` means too many epochs.
+- Each epoch on T4 takes ~15-25 min at this size. If you see >35 min/epoch,
+  your batch is starving the GPU — bump `--batch-size` if VRAM allows.
 
 ---
 
@@ -106,7 +120,8 @@ What to watch:
 !ls -lh models/chess/
 ```
 
-Expect `pretrained.pt` ~70 MB at the 96ch×8 config.
+Expect `pretrained.pt` around **~45-50 MB** at the 128×10 config (state-dict
+only — no optimizer state saved).
 
 ---
 
@@ -119,7 +134,7 @@ from src.config import Config
 from src.games import ChessGame
 from src.nn.net import NeuralNet
 
-cfg = Config(num_channels=96, num_res_blocks=8, device='cuda',
+cfg = Config(num_channels=128, num_res_blocks=10, device='cuda',
              checkpoint_dir='models/chess')
 game = ChessGame()
 net = NeuralNet(game, cfg)
@@ -143,26 +158,42 @@ mass on a handful of common opening moves (the indices for `1.e4`, `1.d4`,
    finalises outputs).
 2. After the version saves, the right-side panel → **Output** lists files.
    Find `models/chess/pretrained.pt` and download.
-3. On the laptop, place it at `models/chess/pretrained.pt`.
-4. Continue with self-play, matching the net architecture you pretrained:
+3. On the laptop, place it at `models/chess/pretrained.pt` (overwriting any
+   older 96×8 file).
+4. Delete or rename the old self-play checkpoints — they're 96×8 and
+   incompatible with the new 128×10 net:
    ```powershell
-   python scripts/train_chess.py --init-from models/chess/pretrained.pt `
-       --channels 96 --res-blocks 8
+   cd D:\GoodProjects\Chesseng\models\chess
+   Rename-Item best.pt best_96x8.pt -ErrorAction SilentlyContinue
+   Rename-Item latest.pt latest_96x8.pt -ErrorAction SilentlyContinue
+   Remove-Item temp.pt -ErrorAction SilentlyContinue
+   ```
+5. Continue with self-play, matching the net architecture you pretrained:
+   ```powershell
+   python scripts\train_chess.py `
+       --init-from models\chess\pretrained.pt `
+       --channels 128 --res-blocks 10 `
+       --sims 120 --mcts-batch 32 `
+       --workers 4 --worker-device cuda `
+       --games 16
    ```
    The `--channels` / `--res-blocks` flags **must match** the pretrain
-   config or `load_state_dict` will refuse with a shape mismatch.
+   config or `load_state_dict` will refuse with a shape mismatch. No
+   `--resume` on the first run — that flag looks for `latest.pt`, which
+   you just renamed.
 
 ---
 
 ## Tips for multi-session pretraining
 
-Kaggle sessions auto-kill at 9h. If you want longer/more epochs:
+Kaggle sessions auto-kill at 9 h. If you want longer/more epochs:
 
 - Re-run Cell 4 with a different `--max-positions` and a different `--out`
   path in subsequent sessions (e.g. `--out models/chess/pretrained_v2.pt`).
-- Or: bump `--epochs` in a single session — most gain comes in the first 3–4
+- Or: bump `--epochs` in a single session — most gain comes in the first 3-4
   epochs anyway. Diminishing returns past that.
 
-The 30h weekly Kaggle quota easily covers a strong pretrain plus several
-follow-up sessions. Use the rest of the quota for the **self-play**
-continuation if you don't want to run it locally.
+The 30 h weekly Kaggle quota easily covers a 128×10 pretrain (~2 h) plus
+several follow-up sessions. Use the rest of the quota for **self-play
+continuation** if you don't want to run it locally — see
+`docs/KAGGLE_TRAIN.md` if/when that's written.
