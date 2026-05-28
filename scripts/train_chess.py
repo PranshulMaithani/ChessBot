@@ -124,7 +124,7 @@ def main():
     try:
         coach.learn()
     except KeyboardInterrupt:
-        print("\ninterrupted — latest weights are in models/latest.pt")
+        print(f"\ninterrupted — latest weights are in {cfg.checkpoint_dir}/latest.pt")
 
 
 if __name__ == "__main__":
